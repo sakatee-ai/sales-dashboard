@@ -1,26 +1,32 @@
-from datetime import datetime
-import os
-import pandas as pd
+import tkinter as tk
+from tkinter import ttk
 
-# ===== 読み込み部分（ここは既にあるよね） =====
-csv_path = os.path.join(os.path.dirname(__file__), "..", "data", "sample.csv")
-csv_path = os.path.abspath(csv_path)
-df = pd.read_csv(csv_path)
+def create_treeview(window):
+    style = ttk.Style()
+    style.configure("Treeview", font=("Arial", 12), rowheight=25)
 
-# ===== 加工（例：30歳以上） =====
-df_filtered = df[df["年齢"] >= 30]
+    tree = ttk.Treeview(window)
+    tree.pack(fill="both", expand=True)
 
-# ===== 出力パス構築 =====
-now = datetime.now()
-month_folder = now.strftime("%Y%m")         # 例：202504
-timestamp = now.strftime("%Y%m%d_%H%M")      # 例：20250424_1830
-filename = f"sample_filtered_{timestamp}.csv"
+    tree.column("#0", width=200)  # ツリーの幅広げる
 
-# 月別フォルダに出力
-output_dir = os.path.join(os.path.dirname(__file__), "..", "output", month_folder)
-os.makedirs(output_dir, exist_ok=True)
+    folder1 = tree.insert("", "end", text="フォルダA", open=True)
+    tree.insert(folder1, "end", text="file1.csv")
+    tree.insert(folder1, "end", text="file2.csv")
 
-output_path = os.path.join(output_dir, filename)
-df_filtered.to_csv(output_path, index=False, encoding="utf-8-sig")
+    folder2 = tree.insert("", "end", text="フォルダB", open=True)
+    tree.insert(folder2, "end", text="file3.csv")
 
-print(f"✅ 月別フォルダに保存しました: {output_path}")
+    return tree
+
+def main():
+    window = tk.Tk()
+    window.title("CSVアプリ - ツリービュー改")
+    window.geometry("400x300")
+
+    create_treeview(window)
+
+    window.mainloop()
+
+if __name__ == "__main__":
+    main()
