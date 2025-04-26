@@ -112,28 +112,6 @@ def on_column_double_click(event):
         column = table["columns"][col_index]
         sort_table_by_column(column)
 
-# ヘッダーテキストクリック（右端クリックでフィルター）
-def on_column_click(event):
-    region = table.identify("region", event.x, event.y)
-    if region == "heading":
-        col_id = table.identify_column(event.x)
-        col_index = int(col_id.replace("#", "")) - 1
-        if col_index == 0:
-            return
-        col_name = table["columns"][col_index]
-        col_width = table.column(col_name, option="width")
-        if event.x > table.bbox("", col_id)[0] + col_width - 20:
-            show_filter_popup(col_name, event.x_root, event.y_root)
-
-# フィルターポップアップ（未実装）
-def show_filter_popup(col_name, x, y):
-    popup = tk.Toplevel()
-    popup.geometry(f"150x200+{x}+{y}")
-    popup.title(f"{col_name} フィルター")
-    label = tk.Label(popup, text=f"[{col_name}]の候補をここに出す", anchor="w")
-    label.pack(fill="both", expand=True, padx=5, pady=5)
-
-# テーブルソート
 def sort_table_by_column(column):
     global original_df, sort_states
     if original_df is None or original_df.empty:
@@ -142,6 +120,51 @@ def sort_table_by_column(column):
     sort_states[column] = not ascending
     sorted_df = original_df.sort_values(by=column, ascending=ascending)
     display_table(sorted_df, table)
+
+# ヘッダクリック処理（フィルターアイコン領域）
+def on_header_click(event):
+    region = table.identify("region", event.x, event.y)
+    if region == "heading":
+        col_id = table.identify_column(event.x)
+        col_index = int(col_id.replace("#", "")) - 1
+        if col_index == 0:
+            return
+
+        col_name = table["columns"][col_index]
+        bbox = table.bbox("", col_id)
+        col_width = bbox[2]
+
+        if event.x > bbox[0] + col_width * 0.9:
+            show_filter_popup(col_name, event.x_root, event.y_root)
+        else:
+            sort_table_by_column(col_name)
+
+def show_filter_popup(col_name, x, y):
+    popup = tk.Toplevel()
+    popup.geometry(f"150x200+{x}+{y}")
+    popup.title(f"{col_name} フィルター")
+
+    if original_df is not None:
+        values = sorted(original_df[col_name].dropna().astype(str).unique())
+    else:
+        values = ["データなし"]
+
+    listbox = tk.Listbox(popup, selectmode="multiple")
+    listbox.pack(expand=True, fill="both")
+
+    for val in values:
+        listbox.insert(tk.END, val)
+
+    ttk.Button(popup, text="フィルター適用",
+               command=lambda: apply_selected_filters(col_name, listbox, popup)).pack(pady=5)
+
+def apply_selected_filters(col_name, listbox, popup):
+    global original_df
+    selected = [listbox.get(i) for i in listbox.curselection()]
+    if selected:
+        df_filtered = original_df[original_df[col_name].astype(str).isin(selected)]
+        display_table(df_filtered, table)
+    popup.destroy()
 
 # 保存ボタン群の追加
 def add_save_buttons(parent_frame, table, get_current_path, set_current_path):
@@ -216,7 +239,7 @@ def create_ui():
     vsb.pack(side="right", fill="y")
     hsb.pack(side="bottom", fill="x")
     table.bind("<Double-1>", on_column_double_click)
-    table.bind("<Button-1>", on_column_click)
+    table.bind("<Button-1>", on_header_click)
     paned.add(frame_right)
 
     current_file_path = {"path": None}
