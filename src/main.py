@@ -1,25 +1,41 @@
+import customtkinter as ctk
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, filedialog, messagebox
 import csv
 import os
 import pandas as pd
 
-original_df = None  # フィルター元データ
-filter_entries = []  # フィルターUI
-sort_states = {}  # 各列のソート状態
+# Treeviewスタイルをダークテーマに
+style = ttk.Style()
+style.theme_use("clam")
+style.configure("Treeview",
+    background="#333333",
+    foreground="white",
+    rowheight=25,
+    fieldbackground="#333333",
+    bordercolor="#444444",
+    borderwidth=1)
+style.configure("Treeview.Heading",
+    background="#444444",
+    foreground="white",
+    bordercolor="#444444",
+    borderwidth=1)
 
-# ツリー構築
+original_df = None
+filter_entries = []
+sort_states = {}
+
+# ディレクトリツリーを構築
 def build_tree_from_directory(tree, parent, path):
     for entry in sorted(os.listdir(path)):
         full_path = os.path.join(path, entry)
         if os.path.isdir(full_path):
             node = tree.insert(parent, "end", text=entry, open=False, values=[full_path])
             build_tree_from_directory(tree, node, full_path)
-        else:
-            if entry.endswith(".csv"):
-                tree.insert(parent, "end", text=entry, values=[full_path])
+        elif entry.endswith(".csv"):
+            tree.insert(parent, "end", text=entry, values=[full_path])
 
-# 表表示処理
+# CSV選択時の処理
 def on_item_click(event, tree, table_widget):
     global original_df
     selected_item = tree.focus()
@@ -35,42 +51,38 @@ def on_item_click(event, tree, table_widget):
         except Exception as e:
             messagebox.showerror("エラー", f"読み込み失敗: {e}")
 
-# 表描画処理
+# テーブル表示
 def display_table(df, table_widget):
     table_widget.delete(*table_widget.get_children())
     columns = ["選択"] + list(df.columns)
-    table_widget["columns"] = columns
-    table_widget["show"] = "headings"
+    table_widget.configure(columns=columns, show="headings")
 
     for col in columns:
         table_widget.heading(col, text=col)
-        if col == "選択":
-            table_widget.column(col, width=60, anchor="center", stretch=False)
-        else:
-            table_widget.column(col, width=150, anchor="center", stretch=False)
+        table_widget.column(col, width=100 if col == "選択" else 150, anchor="center", stretch=False)
 
     for _, row in df.iterrows():
         values = ["☐"] + row.tolist()
         table_widget.insert("", "end", values=values)
 
-# 保存処理
+# CSV保存
 def save_table_to_csv(table, file_path):
     if not file_path:
-        messagebox.showwarning("保存先未設定", "保存先ファイルパスがありません。")
+        messagebox.showwarning("保存できません", "ファイルが開かれていません。")
         return
     try:
         with open(file_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            headers = table["columns"][1:]  # '選択'列を除く
+            headers = table["columns"][1:]
             writer.writerow(headers)
             for row_id in table.get_children():
-                values = table.item(row_id, "values")[1:]  # '選択'列を除く
+                values = table.item(row_id, "values")[1:]
                 writer.writerow(values)
         messagebox.showinfo("保存完了", f"{file_path} に保存しました。")
     except Exception as e:
         messagebox.showerror("保存エラー", str(e))
 
-# フィルター処理
+# フィルター適用
 def apply_filters(table_widget):
     global original_df, filter_entries
     if original_df is None:
@@ -82,36 +94,35 @@ def apply_filters(table_widget):
             df_filtered = df_filtered[df_filtered[col].astype(str).str.contains(val, na=False)]
     display_table(df_filtered, table_widget)
 
-# フィルター入力欄を更新
+# フィルター欄更新
 def update_filter_inputs(df):
     global filter_entries
     for widget in filter_entries:
         widget.destroy()
     filter_entries.clear()
 
-    dummy_label = ttk.Label(filter_row, text="選択")
+    dummy_label = ctk.CTkLabel(filter_row, text="選択")
     dummy_label.grid(row=0, column=0, padx=2, pady=2)
 
     for i, col in enumerate(df.columns):
-        values = ["すべて"] + sorted(df[col].dropna().astype(str).unique().tolist())
-        var = tk.StringVar()
-        combo = ttk.Combobox(filter_row, textvariable=var, values=values, state="readonly", width=16)
-        combo.current(0)
+        values = ["すべて"] + sorted(df[col].dropna().astype(str).unique())
+        var = ctk.StringVar()  # 修正ポイント！！！！
+        combo = ctk.CTkOptionMenu(filter_row, variable=var, values=values, command=lambda e: apply_filters(table))
         combo.grid(row=0, column=i+1, padx=2, pady=2)
-        combo.bind("<<ComboboxSelected>>", lambda e: apply_filters(table))
         filter_entries.append(combo)
 
-# ソート処理（ダブルクリック）
+# カラムダブルクリック時のソート
 def on_column_double_click(event):
     region = table.identify("region", event.x, event.y)
     if region == "heading":
         col_id = table.identify_column(event.x)
         col_index = int(col_id.replace("#", "")) - 1
         if col_index == 0:
-            return  # '選択'列は無視
+            return
         column = table["columns"][col_index]
         sort_table_by_column(column)
 
+# カラム名でソート
 def sort_table_by_column(column):
     global original_df, sort_states
     if original_df is None or original_df.empty:
@@ -121,96 +132,44 @@ def sort_table_by_column(column):
     sorted_df = original_df.sort_values(by=column, ascending=ascending)
     display_table(sorted_df, table)
 
-# ヘッダクリック処理（フィルターアイコン領域）
-def on_header_click(event):
-    region = table.identify("region", event.x, event.y)
-    if region == "heading":
-        col_id = table.identify_column(event.x)
-        col_index = int(col_id.replace("#", "")) - 1
-        if col_index == 0:
-            return
-
-        col_name = table["columns"][col_index]
-        bbox = table.bbox("", col_id)
-        col_width = bbox[2]
-
-        if event.x > bbox[0] + col_width * 0.9:
-            show_filter_popup(col_name, event.x_root, event.y_root)
-        else:
-            sort_table_by_column(col_name)
-
-def show_filter_popup(col_name, x, y):
-    popup = tk.Toplevel()
-    popup.geometry(f"150x200+{x}+{y}")
-    popup.title(f"{col_name} フィルター")
-
-    if original_df is not None:
-        values = sorted(original_df[col_name].dropna().astype(str).unique())
-    else:
-        values = ["データなし"]
-
-    listbox = tk.Listbox(popup, selectmode="multiple")
-    listbox.pack(expand=True, fill="both")
-
-    for val in values:
-        listbox.insert(tk.END, val)
-
-    ttk.Button(popup, text="フィルター適用",
-               command=lambda: apply_selected_filters(col_name, listbox, popup)).pack(pady=5)
-
-def apply_selected_filters(col_name, listbox, popup):
-    global original_df
-    selected = [listbox.get(i) for i in listbox.curselection()]
-    if selected:
-        df_filtered = original_df[original_df[col_name].astype(str).isin(selected)]
-        display_table(df_filtered, table)
-    popup.destroy()
-
-# 保存ボタン群の追加
+# 保存ボタン
 def add_save_buttons(parent_frame, table, get_current_path, set_current_path):
-    button_frame = ttk.Frame(parent_frame)
+    button_frame = ctk.CTkFrame(parent_frame)
     button_frame.pack(fill="x", padx=10, pady=5)
 
-    def save():
-        path = get_current_path()
-        if not path:
-            messagebox.showwarning("保存できません", "ファイルが開かれていません。")
-            return
+    ctk.CTkButton(button_frame, text="保存", command=lambda: save_table_to_csv(table, get_current_path())).pack(side="left", padx=5)
+    ctk.CTkButton(button_frame, text="名前をつけて保存", command=lambda: save_as_dialog(table, set_current_path)).pack(side="left", padx=5)
+
+# 名前を付けて保存
+def save_as_dialog(table, set_current_path):
+    path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSVファイル", "*.csv")])
+    if path:
+        set_current_path(path)
         save_table_to_csv(table, path)
 
-    def save_as():
-        path = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSVファイル", "*.csv")],
-            title="名前をつけて保存"
-        )
-        if path:
-            set_current_path(path)
-            save_table_to_csv(table, path)
-
-    ttk.Button(button_frame, text="保存", command=save).pack(side="left", padx=5)
-    ttk.Button(button_frame, text="名前をつけて保存", command=save_as).pack(side="left", padx=5)
-
-# UI本体
+# メインUI作成
 def create_ui():
     global filter_row, table
 
-    window = tk.Tk()
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+
+    window = ctk.CTk()
     window.title("CSV表ビューア")
-    window.geometry("1100x740")
+    window.geometry("1200x800")
 
-    style = ttk.Style()
-    style.configure("Treeview", font=("Arial", 11), rowheight=25)
+    main_frame = ctk.CTkFrame(window)
+    main_frame.pack(fill="both", expand=True)
 
-    paned = ttk.PanedWindow(window, orient=tk.HORIZONTAL)
-    paned.pack(fill="both", expand=True)
+    left_frame = ctk.CTkFrame(main_frame, width=250)
+    left_frame.pack(side="left", fill="y")
 
-    frame_left = ttk.Frame(paned, width=250)
-    frame_left.pack_propagate(False)
-    tree = ttk.Treeview(frame_left)
+    right_frame = ctk.CTkFrame(main_frame)
+    right_frame.pack(side="left", fill="both", expand=True)
+
+    tree = ttk.Treeview(left_frame)
     tree.pack(fill="both", expand=True)
     tree.column("#0", width=220)
-    paned.add(frame_left)
 
     root_path = "data"
     if os.path.exists(root_path):
@@ -219,19 +178,14 @@ def create_ui():
     else:
         messagebox.showwarning("フォルダなし", f"{root_path} が存在しません")
 
-    frame_right = ttk.Frame(paned)
-    filter_row = ttk.Frame(frame_right)
+    filter_row = ctk.CTkFrame(right_frame)
     filter_row.pack(fill="x", padx=10, pady=3)
 
-    vsb = ttk.Scrollbar(frame_right, orient="vertical")
-    hsb = ttk.Scrollbar(frame_right, orient="horizontal")
+    vsb = ttk.Scrollbar(right_frame, orient="vertical")
+    hsb = ttk.Scrollbar(right_frame, orient="horizontal")
 
-    table = ttk.Treeview(
-        frame_right,
-        show="headings",
-        yscrollcommand=vsb.set,
-        xscrollcommand=hsb.set
-    )
+    global table
+    table = ttk.Treeview(right_frame, show="headings", yscrollcommand=vsb.set, xscrollcommand=hsb.set)
     vsb.config(command=table.yview)
     hsb.config(command=table.xview)
 
@@ -239,9 +193,8 @@ def create_ui():
     vsb.pack(side="right", fill="y")
     hsb.pack(side="bottom", fill="x")
     table.bind("<Double-1>", on_column_double_click)
-    table.bind("<Button-1>", on_header_click)
-    paned.add(frame_right)
 
+    global current_file_path
     current_file_path = {"path": None}
 
     def on_tree_select_wrapper(event):
@@ -252,9 +205,7 @@ def create_ui():
 
     tree.bind("<<TreeviewSelect>>", on_tree_select_wrapper)
 
-    add_save_buttons(window, table,
-                     get_current_path=lambda: current_file_path["path"],
-                     set_current_path=lambda path: current_file_path.update({"path": path}))
+    add_save_buttons(right_frame, table, lambda: current_file_path["path"], lambda p: current_file_path.update({"path": p}))
 
     window.mainloop()
 
