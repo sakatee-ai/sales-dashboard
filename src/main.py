@@ -15,6 +15,13 @@ overview_year_selector = None
 monthly_table = None
 monthly_total_label = None
 monthly_year_selector = None
+yearly_table = None
+yearly_total_label = None
+start_date_widget = None
+end_date_widget = None
+date_column_var = None
+date_column_selector = None
+sort_states = {}
 
 # --- 初期ウィンドウ非表示 (Linux対策) ---
 dummy_root = tk.Tk()
@@ -29,6 +36,45 @@ def load_products_master():
         products_df = None
         print(f"商品マスター読み込みエラー: {e}")
 
+# --- 日付カラム自動検出関数（厳格版） ---
+def detect_date_columns(df):
+    date_columns = []
+    for col in df.columns:
+        try:
+            parsed = pd.to_datetime(df[col], errors='coerce', format='%Y-%m-%d')
+            if parsed.notna().sum() / len(parsed) > 0.8:
+                date_columns.append(col)
+        except Exception:
+            continue
+    return date_columns
+
+# --- ソート実行ロジック ---
+def on_column_double_click(event):
+    region = overview_table.identify("region", event.x, event.y)
+    if region == "heading":
+        col_id = overview_table.identify_column(event.x)
+        col_index = int(col_id.replace("#", "")) - 1
+        if col_index == 0:
+            return
+        column_name = overview_table["columns"][col_index]
+        sort_overview_table_by_column(column_name)
+
+def sort_overview_table_by_column(column_name):
+    global overview_table, sort_states
+
+    rows = [(overview_table.set(k, column_name), k) for k in overview_table.get_children("")]
+    ascending = sort_states.get(column_name, True)
+
+    try:
+        rows.sort(key=lambda t: float(t[0].replace(',', '')), reverse=not ascending)
+    except ValueError:
+        rows.sort(reverse=not ascending)
+
+    for index, (val, k) in enumerate(rows):
+        overview_table.move(k, '', index)
+
+    sort_states[column_name] = not ascending
+
 # --- ビューモード起動 ---
 def launch_view_mode():
     global view_window
@@ -37,11 +83,9 @@ def launch_view_mode():
     view_window.title("ビューモード - 売上ダッシュボード")
     view_window.geometry("1400x900")
 
-    # 編集モードへボタン
     edit_button = ctk.CTkButton(view_window, text="編集モードへ", command=launch_edit_mode)
     edit_button.pack(side="top", anchor="ne", padx=10, pady=10)
 
-    # タブビュー作成
     tabview = ctk.CTkTabview(view_window)
     tabview.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -58,6 +102,26 @@ def launch_view_mode():
 # --- 売上一覧タブ設定 ---
 def setup_overview_tab(tab_frame):
     global overview_table, overview_total_label, overview_year_selector
+    global start_date_widget, end_date_widget, date_column_var, date_column_selector
+
+    control_frame = ctk.CTkFrame(tab_frame)
+    control_frame.pack(fill="x", padx=10, pady=5)
+
+    ctk.CTkLabel(control_frame, text="対象列").pack(side="left", padx=5)
+    date_column_var = tk.StringVar()
+    date_column_selector = ctk.CTkOptionMenu(control_frame, variable=date_column_var, values=["日付"])
+    date_column_selector.pack(side="left", padx=5)
+
+    ctk.CTkLabel(control_frame, text="開始日").pack(side="left", padx=5)
+    start_date_widget = DateEntry(control_frame, width=12, background='darkblue', foreground='white', date_pattern='yyyy-mm-dd')
+    start_date_widget.pack(side="left", padx=5)
+
+    ctk.CTkLabel(control_frame, text="終了日").pack(side="left", padx=5)
+    end_date_widget = DateEntry(control_frame, width=12, background='darkblue', foreground='white', date_pattern='yyyy-mm-dd')
+    end_date_widget.pack(side="left", padx=5)
+
+    search_button = ctk.CTkButton(control_frame, text="検索", command=apply_custom_filter)
+    search_button.pack(side="left", padx=5)
 
     frame = ctk.CTkFrame(tab_frame)
     frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -69,45 +133,88 @@ def setup_overview_tab(tab_frame):
     vsb.config(command=overview_table.yview)
     hsb.config(command=overview_table.xview)
 
+    overview_table.bind("<Double-1>", on_column_double_click)
+
     overview_table.pack(fill="both", expand=True)
     vsb.pack(side="right", fill="y")
     hsb.pack(side="bottom", fill="x")
 
-    # 年度選択ドロップダウン
-    year_frame = ctk.CTkFrame(tab_frame)
-    year_frame.pack(pady=5)
-
-    ctk.CTkLabel(year_frame, text="年度選択").pack(side="left", padx=5)
-    overview_year_selector = ctk.CTkOptionMenu(year_frame, values=["全体"], command=lambda _: refresh_overview_table())
-    overview_year_selector.pack(side="left", padx=5)
-
-    # 売上合計表示欄
     overview_total_label = ctk.CTkLabel(tab_frame, text="売上合計: 0 円", font=("Arial", 16))
     overview_total_label.pack(pady=5)
 
     refresh_overview_table()
 
+# --- 月別売上タブ設定 ---
+def setup_monthly_tab(tab_frame):
+    global monthly_table, monthly_total_label
+
+    frame = ctk.CTkFrame(tab_frame)
+    frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+    vsb = ttk.Scrollbar(frame, orient="vertical")
+    hsb = ttk.Scrollbar(frame, orient="horizontal")
+
+    monthly_table = ttk.Treeview(frame, show="headings", yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+    vsb.config(command=monthly_table.yview)
+    hsb.config(command=monthly_table.xview)
+
+    monthly_table.pack(fill="both", expand=True)
+    vsb.pack(side="right", fill="y")
+    hsb.pack(side="bottom", fill="x")
+
+    monthly_total_label = ctk.CTkLabel(tab_frame, text="月別売上ビュー（データ未取得）", font=("Arial", 16))
+    monthly_total_label.pack(pady=5)
+
+# --- 年度別売上タブ設定 ---
+def setup_yearly_tab(tab_frame):
+    global yearly_table, yearly_total_label
+
+    frame = ctk.CTkFrame(tab_frame)
+    frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+    vsb = ttk.Scrollbar(frame, orient="vertical")
+    hsb = ttk.Scrollbar(frame, orient="horizontal")
+
+    yearly_table = ttk.Treeview(frame, show="headings", yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+    vsb.config(command=yearly_table.yview)
+    hsb.config(command=yearly_table.xview)
+
+    yearly_table.pack(fill="both", expand=True)
+    vsb.pack(side="right", fill="y")
+    hsb.pack(side="bottom", fill="x")
+
+    yearly_total_label = ctk.CTkLabel(tab_frame, text="年度別売上ビュー（データ未取得）", font=("Arial", 16))
+    yearly_total_label.pack(pady=5)
+
+# --- カスタムフィルター検索 ---
+def apply_custom_filter():
+    start = start_date_widget.get_date()
+    end = end_date_widget.get_date()
+    refresh_overview_table(start, end)
+
 # --- 売上一覧更新 ---
-def refresh_overview_table():
-    global products_df
+def refresh_overview_table(start_date=None, end_date=None):
+    global products_df, date_column_selector
 
     if products_df is None or not os.path.exists('data/sales.csv'):
         return
 
     sales_df = pd.read_csv('data/sales.csv')
     joined = pd.merge(sales_df, products_df, on="商品ID", how="left")
-    joined['日付'] = pd.to_datetime(joined['日付'], errors='coerce')
 
-    fiscal_years = sorted(list(set(joined['日付'].apply(lambda d: d.year if d.month >= 4 else d.year - 1).dropna())), reverse=True)
-    if overview_year_selector.cget("values") == ("全体",):
-        overview_year_selector.configure(values=["全体"] + [str(y) for y in fiscal_years])
-        overview_year_selector.set(str(fiscal_years[0]))
+    date_columns = detect_date_columns(joined)
+    if date_columns:
+        date_column_selector.configure(values=date_columns)
+        date_column_var.set(date_columns[0])
 
-    selected_year = overview_year_selector.get()
+    selected_date_column = date_column_var.get()
 
-    if selected_year != "全体":
-        selected_year = int(selected_year)
-        joined = joined[(joined['日付'] >= f"{selected_year}-04-01") & (joined['日付'] <= f"{selected_year+1}-03-31")]
+    if selected_date_column in joined.columns:
+        joined[selected_date_column] = pd.to_datetime(joined[selected_date_column], errors='coerce')
+
+    if start_date and end_date and selected_date_column in joined.columns:
+        joined = joined[(joined[selected_date_column] >= pd.to_datetime(start_date)) &
+                        (joined[selected_date_column] <= pd.to_datetime(end_date))]
 
     overview_table.delete(*overview_table.get_children())
     columns = ["日付", "顧客名", "商品名", "数量", "金額", "登録日"]
@@ -124,82 +231,7 @@ def refresh_overview_table():
     total = joined['金額'].sum()
     overview_total_label.configure(text=f"売上合計: {int(total)} 円")
 
-# --- 月別売上タブ設定 ---
-def setup_monthly_tab(tab_frame):
-    global monthly_table, monthly_total_label, monthly_year_selector
-
-    frame = ctk.CTkFrame(tab_frame)
-    frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-    vsb = ttk.Scrollbar(frame, orient="vertical")
-    hsb = ttk.Scrollbar(frame, orient="horizontal")
-
-    monthly_table = ttk.Treeview(frame, show="headings", yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-    vsb.config(command=monthly_table.yview)
-    hsb.config(command=monthly_table.xview)
-
-    monthly_table.pack(fill="both", expand=True)
-    vsb.pack(side="right", fill="y")
-    hsb.pack(side="bottom", fill="x")
-
-    # 年度選択ドロップダウン
-    year_frame = ctk.CTkFrame(tab_frame)
-    year_frame.pack(pady=5)
-
-    ctk.CTkLabel(year_frame, text="年度選択").pack(side="left", padx=5)
-    monthly_year_selector = ctk.CTkOptionMenu(year_frame, values=["全体"], command=lambda _: refresh_monthly_table())
-    monthly_year_selector.pack(side="left", padx=5)
-
-    # 売上合計表示欄
-    monthly_total_label = ctk.CTkLabel(tab_frame, text="売上合計: 0 円", font=("Arial", 16))
-    monthly_total_label.pack(pady=5)
-
-    refresh_monthly_table()
-
-# --- 月別売上更新 ---
-def refresh_monthly_table():
-    global products_df
-
-    if products_df is None or not os.path.exists('data/sales.csv'):
-        return
-
-    sales_df = pd.read_csv('data/sales.csv')
-    joined = pd.merge(sales_df, products_df, on="商品ID", how="left")
-    joined['日付'] = pd.to_datetime(joined['日付'], errors='coerce')
-
-    fiscal_years = sorted(list(set(joined['日付'].apply(lambda d: d.year if d.month >= 4 else d.year - 1).dropna())), reverse=True)
-    if monthly_year_selector.cget("values") == ("全体",):
-        monthly_year_selector.configure(values=["全体"] + [str(y) for y in fiscal_years])
-        monthly_year_selector.set(str(fiscal_years[0]))
-
-    selected_year = monthly_year_selector.get()
-
-    if selected_year != "全体":
-        selected_year = int(selected_year)
-        joined = joined[(joined['日付'] >= f"{selected_year}-04-01") & (joined['日付'] <= f"{selected_year+1}-03-31")]
-
-    joined['年月'] = joined['日付'].dt.to_period('M')
-    grouped = joined.groupby('年月')['金額'].sum().reset_index()
-
-    monthly_table.delete(*monthly_table.get_children())
-    monthly_table.configure(columns=["年月", "売上合計"])
-
-    for col in ["年月", "売上合計"]:
-        monthly_table.heading(col, text=col)
-        monthly_table.column(col, width=150, anchor="center", stretch=False)
-
-    for _, row in grouped.iterrows():
-        monthly_table.insert("", "end", values=[row['年月'], int(row['金額'])])
-
-    total = grouped['金額'].sum()
-    monthly_total_label.configure(text=f"売上合計: {int(total)} 円")
-
-# --- 年度別売上タブ設定 (仮) ---
-def setup_yearly_tab(tab_frame):
-    label = ctk.CTkLabel(tab_frame, text="年度別売上集計は後で作成予定", font=("Arial", 16))
-    label.pack(pady=20)
-
-# --- 編集モード起動 (簡易版) ---
+# --- 編集モード起動(仮) ---
 def launch_edit_mode():
     pass
 
