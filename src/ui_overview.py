@@ -1,11 +1,11 @@
-
 import tkinter as tk
 import pandas as pd
 from tkinter import ttk
 from tkcalendar import DateEntry
 import datetime
 import customtkinter as ctk
-from utils import SALES_CSV, CATEGORIES_CSV
+from utils import SALES_CSV, CATEGORIES_CSV, get_products_df
+import os
 
 overview_table = None
 overview_total_label = None
@@ -16,13 +16,36 @@ category_filter_var = None
 default_start_date = None
 default_end_date = None
 
-def refresh_overview_table(products_df):
-    import os
+def save_filtered_sales():
+    if overview_table is None:
+        return
+
+    rows = []
+    for child in overview_table.get_children():
+        row = overview_table.item(child)["values"]
+        rows.append(row)
+
+    if not rows:
+        print("保存対象がありません。")
+        return
+
+    columns = ["販売日", "顧客名", "カテゴリ名", "商品名", "数量", "金額", "更新日"]
+    df = pd.DataFrame(rows, columns=columns)
+
+    os.makedirs("output", exist_ok=True)
+    today_str = datetime.date.today().strftime("%Y%m%d")
+    file_path = f"output/filtered_sales_{today_str}.csv"
+
+    df.to_csv(file_path, index=False, encoding="utf-8-sig")
+    print(f"保存しました: {file_path}")
+
+def refresh_overview_table():
+    print("🔄 refresh_overview_table 実行中")
+    products_df = get_products_df()
+    
     try:
         sales_df = pd.read_csv(SALES_CSV)
         joined = pd.merge(sales_df, products_df, on="商品ID", how="left")
-        categories_df = pd.read_csv(CATEGORIES_CSV)
-        joined = pd.merge(joined, categories_df, on="カテゴリID", how="left")
         joined["販売日"] = pd.to_datetime(joined["販売日"], errors="coerce")
     except Exception as e:
         print("読み込みエラー:", e)
@@ -49,13 +72,14 @@ def refresh_overview_table(products_df):
 
     total = pd.to_numeric(joined["金額"], errors="coerce").sum()
     overview_total_label.configure(text=f"売上合計: {int(total)} 円")
+    print("✅ 一覧更新完了")
 
-def reset_filters(products_df):
+def reset_filters():
     customer_filter_var.set("すべて")
     category_filter_var.set("すべて")
     start_date_widget.set_date(default_start_date)
     end_date_widget.set_date(default_end_date)
-    refresh_overview_table(products_df)
+    refresh_overview_table()
 
 def setup_overview_tab(tab_frame, products_df):
     global overview_table, overview_total_label
@@ -106,11 +130,14 @@ def setup_overview_tab(tab_frame, products_df):
     category_menu = ctk.CTkOptionMenu(filter_frame, variable=category_filter_var, values=category_list)
     category_menu.pack(side="left", padx=5)
 
-    search_button = ctk.CTkButton(filter_frame, text="検索", command=lambda: refresh_overview_table(products_df))
+    search_button = ctk.CTkButton(filter_frame, text="検索", command=refresh_overview_table)
     search_button.pack(side="right", padx=5)
 
-    reset_button = ctk.CTkButton(filter_frame, text="リセット", command=lambda: reset_filters(products_df))
+    reset_button = ctk.CTkButton(filter_frame, text="リセット", command=reset_filters)
     reset_button.pack(side="right", padx=5)
+
+    save_button = ctk.CTkButton(filter_frame, text="保存", command=save_filtered_sales)
+    save_button.pack(side="right", padx=5)
 
     table_frame = ctk.CTkFrame(tab_frame)
     table_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -128,4 +155,4 @@ def setup_overview_tab(tab_frame, products_df):
     overview_total_label = ctk.CTkLabel(tab_frame, text="売上合計: 0 円")
     overview_total_label.pack(pady=5)
 
-    refresh_overview_table(products_df)
+    refresh_overview_table()

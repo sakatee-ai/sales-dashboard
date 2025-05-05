@@ -26,3 +26,15 @@ def detect_date_columns(df):
         except Exception:
             continue
     return date_columns
+
+_current_products_df = None
+
+def get_products_df():
+    global _current_products_df
+    if _current_products_df is None:
+        _current_products_df = load_products_master()
+    return _current_products_df
+
+def reload_products_df():
+    global _current_products_df
+    _current_products_df = load_products_master()
